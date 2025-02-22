@@ -1,0 +1,23 @@
+{
+  "name": "dann-gpt",
+  "version": "1.0.0",
+  "description": "AI model DannGPT using node-llama-cpp",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.1",
+    "body-parser": "^1.19.0",
+    "cors": "^2.8.5",
+    "node-llama-cpp": "^3.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "author": "DannDev",
+  "license": "MIT"
+}
