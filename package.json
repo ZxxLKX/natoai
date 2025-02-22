@@ -1,22 +1,25 @@
 {
-  "name": "dann-gpt",
+  "name": "dann-gpt-api",
   "version": "1.0.0",
-  "description": "AI model DannGPT using node-llama-cpp",
+  "description": "API for DannGPT AI",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "dependencies": {
-    "express": "^4.18.1",
-    "body-parser": "^1.19.0",
+    "body-parser": "^1.20.3",
     "cors": "^2.8.5",
-    "node-llama-cpp": "^3.6.0"
+    "crypto": "^1.0.1",
+    "express": "^4.21.2",
+    "node-llama-cpp": "^3.6.0",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
-    "nodemon": "^2.0.15"
+    "nodemon": "^3.1.9"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": "16.x"
   },
   "author": "DannDev",
   "license": "MIT"
