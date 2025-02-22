@@ -3,7 +3,7 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const fs = require("fs");
 const crypto = require("crypto");
-const { LlamaCpp } = require("node-llama-cpp"); // Import LLaMA cpp model
+const { getLlama, LlamaChatSession } = require("node-llama-cpp"); // Import LLaMA cpp model
 
 const app = express();
 const PORT = 3000;
@@ -18,54 +18,59 @@ if (!fs.existsSync(TOKENS_DB)) fs.writeFileSync(TOKENS_DB, "{}");
 if (!fs.existsSync(USAGE_DB)) fs.writeFileSync(USAGE_DB, "{}");
 
 // 🔹 Setup LLaMA Model
-const model = new LlamaCpp({
+const llama = await getLlama();
+const model = await llama.loadModel({
     modelPath: "Meta-Llama-3.1-8B-Instruct.Q4_K_M.gguf", // Sesuaikan dengan path model LLaMA yang sudah kamu download
-    numThreads: 4,  // Bisa disesuaikan dengan jumlah thread yang diinginkan
-    nCtx: 512       // Panjang konteks, sesuaikan dengan kebutuhan
+});
+const context = await model.createContext();
+const session = new LlamaChatSession({
+    contextSequence: context.getSequence(),
 });
 
 // 🔹 Ambil Token (1x per bulan per device)
 app.post("/token", (req, res) => {
-    let { device_id, ip } = req.body;
-    if (!device_id || !ip) return res.json({ error: "Device ID & IP diperlukan!" });
+    try {
+        let { device_id, ip } = req.body;
+        if (!device_id || !ip) return res.json({ error: "Device ID & IP diperlukan!" });
 
-    let tokens = JSON.parse(fs.readFileSync(TOKENS_DB));
-    let month = new Date().toISOString().slice(0, 7);
+        let tokens = JSON.parse(fs.readFileSync(TOKENS_DB));
+        let month = new Date().toISOString().slice(0, 7);
 
-    if (tokens[device_id] && tokens[device_id].month === month) {
-        return res.json({ error: "Token sudah diambil bulan ini!" });
+        if (tokens[device_id] && tokens[device_id].month === month) {
+            return res.json({ error: "Token sudah diambil bulan ini!" });
+        }
+
+        let token = crypto.randomBytes(16).toString("hex");
+        tokens[device_id] = { token, ip, month, type: "free", usage: 0 };
+        fs.writeFileSync(TOKENS_DB, JSON.stringify(tokens, null, 2));
+
+        res.json({ token });
+    } catch (error) {
+        handleError(error, "POST /token");
+        res.json({ error: "Terjadi kesalahan saat memproses permintaan token!" });
     }
-
-    let token = crypto.randomBytes(16).toString("hex");
-    tokens[device_id] = { token, ip, month, type: "free", usage: 0 };
-    fs.writeFileSync(TOKENS_DB, JSON.stringify(tokens, null, 2));
-
-    res.json({ token });
 });
 
 // 🔹 Chat API dengan LLaMA AI Model
 app.post("/chat", async (req, res) => {
-    let { model: modelType, token, message } = req.body;
-    let tokens = JSON.parse(fs.readFileSync(TOKENS_DB));
-
-    let user = Object.values(tokens).find(entry => entry.token === token);
-    if (!user) return res.json({ error: "Token tidak valid!" });
-
-    if (!["dannsdk-free", "dannsdk-prem"].includes(modelType)) {
-        return res.json({ error: "Model harus 'dannsdk-free' atau 'dannsdk-prem'!" });
-    }
-
-    if (user.type === "free" && user.usage >= 300) {
-        return res.json({ error: "Batas 300 chat/bulan telah habis! Upgrade ke premium!" });
-    }
-
-    // Menggunakan LLaMA Model untuk menghasilkan respons
     try {
-        const response = await model.generate({
-            prompt: message,
-            maxTokens: 100, // Jumlah token yang dihasilkan untuk setiap pesan
-            temperature: 0.7  // Tingkat keacakan output
-        });
+        let { model: modelType, token, message } = req.body;
+        let tokens = JSON.parse(fs.readFileSync(TOKENS_DB));
+
+        let user = Object.values(tokens).find(entry => entry.token === token);
+        if (!user) return res.json({ error: "Token tidak valid!" });
+
+        if (!["dannsdk-free", "dannsdk-prem"].includes(modelType)) {
+            return res.json({ error: "Model harus 'dannsdk-free' atau 'dannsdk-prem'!" });
+        }
+
+        if (user.type === "free" && user.usage >= 300) {
+            return res.json({ error: "Batas 300 chat/bulan telah habis! Upgrade ke premium!" });
+        }
+
+        // Menggunakan LLaMA Model untuk menghasilkan respons
+        const prompt = `Ini adalah DannGPT, AI yang diciptakan oleh DannDev. Pertanyaan: ${message}`;
+        const response = await session.prompt(prompt);
 
         // Update Penggunaan Token
         user.usage++;
@@ -80,20 +85,26 @@ app.post("/chat", async (req, res) => {
 
         res.json({ response: response.text, remaining: user.type === "free" ? 300 - user.usage : "Unlimited" });
     } catch (error) {
+        handleError(error, "POST /chat");
         res.json({ error: "Terjadi kesalahan saat memproses pesan: " + error.message });
     }
 });
 
 // 🔹 Dashboard Statistik Pemakaian Token
 app.get("/dashboard", (req, res) => {
-    let usage = JSON.parse(fs.readFileSync(USAGE_DB));
-    let stats = Object.entries(usage).map(([token, logs]) => ({
-        token,
-        total_usage: logs.length,
-        last_used: logs.length ? logs[logs.length - 1].time : "Belum digunakan"
-    }));
+    try {
+        let usage = JSON.parse(fs.readFileSync(USAGE_DB));
+        let stats = Object.entries(usage).map(([token, logs]) => ({
+            token,
+            total_usage: logs.length,
+            last_used: logs.length ? logs[logs.length - 1].time : "Belum digunakan"
+        }));
 
-    res.json({ stats });
+        res.json({ stats });
+    } catch (error) {
+        handleError(error, "GET /dashboard");
+        res.json({ error: "Terjadi kesalahan saat mengambil statistik!" });
+    }
 });
 
 // 🔹 UI Dokumentasi + Tombol Ambil Token
@@ -162,5 +173,18 @@ app.get("/", (req, res) => {
         </html>
     `);
 });
+
+// 🔹 Global Error Handling Middleware
+app.use((err, req, res, next) => {
+    handleError(err, "Global Middleware Error");
+    res.status(500).json({ error: "Terjadi kesalahan di server!" });
+});
+
+// 🔹 Function to Handle Errors
+function handleError(error, context) {
+    console.error(`[ERROR] ${context}:`, error.message);
+    // Log the error to a file for monitoring purposes
+    fs.appendFileSync('error_log.txt', `[${new Date().toISOString()}] [${context}] ${error.stack}\n`);
+}
 
 app.listen(PORT, () => console.log(`🚀 DannGPT API berjalan di http://localhost:${PORT}`));
